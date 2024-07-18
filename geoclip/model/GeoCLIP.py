@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from .image_encoder import ImageEncoder
 from .location_encoder import LocationEncoder
 from .misc import load_gps_data, file_dir
+from torch.cuda import is_available as is_cuda_available
 
 from PIL import Image
 from torchvision.transforms import ToPILImage
@@ -24,7 +25,9 @@ class GeoCLIP(nn.Module):
             self.weights_folder = os.path.join(file_dir, "weights")
             self._load_weights()
 
-        self.device = "cpu"
+        self.device = "cuda" if is_cuda_available() else "cpu"
+        self.tensors_gps_gallery = self.gps_gallery.to(self.device)
+        self.location_features = self.location_encoder(self.tensors_gps_gallery)
 
     def to(self, device):
         self.device = device
@@ -77,7 +80,7 @@ class GeoCLIP(nn.Module):
 
         # Compute Features
         image_features = self.image_encoder(image)
-        location_features = self.location_encoder(location)
+        location_features = self.location_features
         logit_scale = self.logit_scale.exp()
         
         # Normalize features
@@ -105,9 +108,9 @@ class GeoCLIP(nn.Module):
         image = self.image_encoder.preprocess_image(image)
         image = image.to(self.device)
 
-        gps_gallery = self.gps_gallery.to(self.device)
+        # gps_gallery = self.gps_gallery.to(self.device)
 
-        logits_per_image = self.forward(image, gps_gallery)
+        logits_per_image = self.forward(image, self.tensors_gps_gallery)
         probs_per_image = logits_per_image.softmax(dim=-1).cpu()
 
         # Get top k predictions
