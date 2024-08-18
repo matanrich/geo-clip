@@ -1,5 +1,6 @@
 import os
 import torch
+import pickle
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
@@ -11,6 +12,7 @@ from torch.cuda import is_available as is_cuda_available
 from PIL import Image
 from torchvision.transforms import ToPILImage
 
+
 class GeoCLIP(nn.Module):
     def __init__(self, from_pretrained=True, queue_size=4096):
         super().__init__()
@@ -18,7 +20,9 @@ class GeoCLIP(nn.Module):
         self.image_encoder = ImageEncoder()
         self.location_encoder = LocationEncoder()
 
-        self.gps_gallery = load_gps_data(os.path.join(file_dir, "gps_gallery", "coordinates_100K.csv"))
+        self.gps_gallery = load_gps_data(
+            os.path.join(file_dir, "gps_gallery", "coordinates_100K.csv")
+        )
         self._initialize_gps_queue(queue_size)
 
         if from_pretrained:
@@ -27,7 +31,13 @@ class GeoCLIP(nn.Module):
 
         self.device = "cuda" if is_cuda_available() else "cpu"
         self.tensors_gps_gallery = self.gps_gallery.to(self.device)
-        self.location_features = self.location_encoder(self.tensors_gps_gallery)
+        if os.path.exists(".cache/location_features"):
+            with open(".cache/location_features", "rb") as f:
+                self.location_features = pickle.load(f)
+        else:
+            self.location_features = self.location_encoder(self.tensors_gps_gallery)
+            with open(".cache/location_features", "wb") as f:
+                pickle.dump(self.location_features, f)
 
     def to(self, device):
         self.device = device
@@ -37,9 +47,15 @@ class GeoCLIP(nn.Module):
         return super().to(device)
 
     def _load_weights(self):
-        self.image_encoder.mlp.load_state_dict(torch.load(f"{self.weights_folder}/image_encoder_mlp_weights.pth"))
-        self.location_encoder.load_state_dict(torch.load(f"{self.weights_folder}/location_encoder_weights.pth"))
-        self.logit_scale = nn.Parameter(torch.load(f"{self.weights_folder}/logit_scale_weights.pth"))
+        self.image_encoder.mlp.load_state_dict(
+            torch.load(f"{self.weights_folder}/image_encoder_mlp_weights.pth")
+        )
+        self.location_encoder.load_state_dict(
+            torch.load(f"{self.weights_folder}/location_encoder_weights.pth")
+        )
+        self.logit_scale = nn.Parameter(
+            torch.load(f"{self.weights_folder}/logit_scale_weights.pth")
+        )
 
     def _initialize_gps_queue(self, queue_size):
         self.queue_size = queue_size
@@ -49,26 +65,28 @@ class GeoCLIP(nn.Module):
 
     @torch.no_grad()
     def dequeue_and_enqueue(self, gps):
-        """ Update GPS queue
+        """Update GPS queue
 
         Args:
             gps (torch.Tensor): GPS tensor of shape (batch_size, 2)
         """
         gps_batch_size = gps.shape[0]
         gps_ptr = int(self.gps_queue_ptr)
-        
-        assert self.queue_size % gps_batch_size == 0, f"Queue size {self.queue_size} should be divisible by batch size {gps_batch_size}"
+
+        assert (
+            self.queue_size % gps_batch_size == 0
+        ), f"Queue size {self.queue_size} should be divisible by batch size {gps_batch_size}"
 
         # Replace the GPS from ptr to ptr+gps_batch_size (dequeue and enqueue)
-        self.gps_queue[:, gps_ptr:gps_ptr + gps_batch_size] = gps.t()
+        self.gps_queue[:, gps_ptr : gps_ptr + gps_batch_size] = gps.t()
         gps_ptr = (gps_ptr + gps_batch_size) % self.queue_size  # move pointer
         self.gps_queue_ptr[0] = gps_ptr
 
     def get_gps_queue(self):
         return self.gps_queue.t()
-                                             
+
     def forward(self, image, location):
-        """ GeoCLIP's forward pass
+        """GeoCLIP's forward pass
 
         Args:
             image (torch.Tensor): Image tensor of shape (n, 3, 224, 224)
@@ -82,11 +100,11 @@ class GeoCLIP(nn.Module):
         image_features = self.image_encoder(image)
         location_features = self.location_features
         logit_scale = self.logit_scale.exp()
-        
+
         # Normalize features
         image_features = F.normalize(image_features, dim=1)
         location_features = F.normalize(location_features, dim=1)
-        
+
         # Cosine similarity (Image Features & Location Features)
         logits_per_image = logit_scale * (image_features @ location_features.t())
 
@@ -94,7 +112,7 @@ class GeoCLIP(nn.Module):
 
     @torch.no_grad()
     def predict(self, image_path, top_k):
-        """ Given an image, predict the top k GPS coordinates
+        """Given an image, predict the top k GPS coordinates
 
         Args:
             image_path (str): Path to the image
