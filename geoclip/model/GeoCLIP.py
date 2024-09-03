@@ -36,7 +36,7 @@ class GeoCLIP(nn.Module):
                 self.location_features = pickle.load(f)
         else:
             self.location_features = self.location_encoder(self.tensors_gps_gallery)
-            os.makedirs(os.path.dirname('.cache'), exist_ok=True)
+            os.makedirs('.cache', exist_ok=True)
             with open(".cache/location_features", "wb") as f:
                 pickle.dump(self.location_features, f)
 
