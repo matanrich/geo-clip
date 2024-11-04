@@ -16,6 +16,7 @@ from torchvision.transforms import ToPILImage
 class GeoCLIP(nn.Module):
     def __init__(self, from_pretrained=True, queue_size=4096):
         super().__init__()
+        self.device = "cuda" if is_cuda_available() else "cpu"
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.image_encoder = ImageEncoder()
         self.location_encoder = LocationEncoder()
@@ -31,7 +32,6 @@ class GeoCLIP(nn.Module):
             self.weights_folder = os.path.join(file_dir, "weights")
             self._load_weights()
 
-        self.device = "cuda" if is_cuda_available() else "cpu"
         self.tensors_gps_gallery = self.gps_gallery.to(self.device)
 
         if os.path.exists(".cache/location_features"):
