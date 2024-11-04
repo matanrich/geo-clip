@@ -20,6 +20,8 @@ class GeoCLIP(nn.Module):
         self.image_encoder = ImageEncoder()
         self.location_encoder = LocationEncoder()
 
+        self.to(self.device)
+
         self.gps_gallery = load_gps_data(
             os.path.join(file_dir, "gps_gallery", "coordinates_100K.csv")
         )
@@ -31,14 +33,16 @@ class GeoCLIP(nn.Module):
 
         self.device = "cuda" if is_cuda_available() else "cpu"
         self.tensors_gps_gallery = self.gps_gallery.to(self.device)
+
         if os.path.exists(".cache/location_features"):
             with open(".cache/location_features", "rb") as f:
                 self.location_features = pickle.load(f)
+                self.location_features = self.location_features.to(self.device)
         else:
             self.location_features = self.location_encoder(self.tensors_gps_gallery)
             os.makedirs('.cache', exist_ok=True)
             with open(".cache/location_features", "wb") as f:
-                pickle.dump(self.location_features, f)
+                pickle.dump(self.location_features.cpu(), f)
 
     def to(self, device):
         self.device = device
